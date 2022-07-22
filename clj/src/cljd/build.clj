@@ -245,22 +245,25 @@
         main-ns (or (:main deps-cljd-opts) main-ns
                   (throw (Exception. "A namespace must be specified in deps.edn under :cljd/opts :main or as argument to init.")))
         libdir (doto (java.io.File. compiler/*lib-path*) .mkdirs)
-        dir (java.io.File. (System/getProperty "user.dir"))
-        project-name (.getName dir)
+        user-dir (System/getProperty "user.dir")
+        org-opts (when-let [org (:org opts)] ["--org" org])
+        platforms-opts (when-let [platforms (:platforms opts)] ["--platforms" platforms])
+        project-name (or (:project opts) (.getName user-dir))
         project_name (str/replace project-name #"[- ]" "_")
         entry-point (case bin
                       "flutter" (java.io.File. libdir "main.dart")
-                      "dart"
-                      (java.io.File. "bin" (str project_name ".dart")))
+                      "dart" (java.io.File. "bin" (str project_name ".dart")))
         lib (compiler/relativize-lib (.getPath entry-point) (compiler/ns-to-lib main-ns))]
     (println "Initializing" (bright project-name) "as a" (bright bin) "project!")
     (or
       (case bin
-        "flutter"
-        (apply exec bin "create" "--project-name" project_name
-          (concat bin-opts [(System/getProperty "user.dir")]))
-        "dart"
-        (apply exec bin "create" "--force" (concat bin-opts [(System/getProperty "user.dir")])))
+        "flutter" (do
+                   (apply exec bin "create" "--project-name" project_name
+                     (concat bin-opts org-opts platforms-opts [user-dir]))
+                   (let [to-remove [(java.io.File. (java.io.File. user-dir "test")
+                                                   "widget_test.dart")]]
+                     (doseq [file to-remove] (.delete file))))
+        "dart" (apply exec bin "create" "--force" (concat bin-opts [user-dir])))
       (spit (java.io.File. "cljd.edn") (pr-str {:main main-ns :bin bin}))
       (spit entry-point (str "export " (compiler/with-dart-str (compiler/write-string-literal lib)) " show main;\n"))
       (println "👍" (green "All setup!") "Let's write some cljd in" main-ns))))
@@ -347,9 +350,12 @@
            :options [help-spec
                      {:short "-f" :long "--flutter" :id :target :value "flutter"}
                      {:short "-d" :long "--dart" :id :target :value "dart"}
+                     {:long "--project" :id :project :parser identity}
+                     {:long "--org" :id :org :parser identity}
+                     {:long "--platforms" :id :platforms :parser identity}
                      ; TODO should be stored in a cljd.local.edn
-                     #_{:short "-p" :long "--path"
-                      :doc "Path to the flutter or dart install."}]
+                     #_{:short "-p" :long "--path"}
+                      :doc "Path to the flutter or dart install."]
            :defaults {:target "flutter"}}
    "compile" {:doc "Compile the specified namespaces (or the main one by default) to dart."}
    "watch" {:doc "Like compile but keep recompiling in response to file updates."}
